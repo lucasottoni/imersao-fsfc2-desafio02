@@ -1,0 +1,39 @@
+table.tableRoute td,
+table.tableRoute th {
+  border: 1px solid #ddd;
+}
+
+table.tableRoute th {
+  background-color: #4caf50;
+  color: white;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+table.tableRoute {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+h1 {
+  text-align: center;
+  width: 100%;
+}
+
+.table-nav {
+  padding-top: 10px;
+  width: 100%;
+  height: 40px;
+  background-color: #4caf50;
+}
+
+.first:disabled,
+.prev:disabled,
+.next:disabled {
+  border-style: dashed;
+}
+
+button {
+  font-weight: bold;
+  border-radius: 30;
+}
