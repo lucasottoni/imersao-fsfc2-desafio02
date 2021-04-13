@@ -24,46 +24,6 @@ Se tiver o GO (1.11+) e docker instalados execute o comando abaixo para instalar
 GO111MODULE="on" go get sigs.k8s.io/kind@v0.10.0 && kind create cluster
 ```
 
-### Load Balancer
-
-Usando o kind, o load balancer não consegue expor um IP externo por padrão. Para realizar esta configuração podemos seguir o tutorial do próprio [kind][lb-kind].
-
-Para facilitar criamos uma pasta (lb-kind) com um [script inicial](lb-kind/install-lb-kind.sh) com alguns comandos para auxiliar.
-
-```bash
-$ kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/master/manifests/namespace.yaml
-$ kubectl create secret generic -n metallb-system memberlist --from-literal=secretkey="$(openssl rand -base64 128)"
-$ kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/master/manifests/metallb.yaml
-$ kubectl get pods -n metallb-system --watch
-```
-
-Aguarde as pods do metallb ficarem prontas e execute o comando
-
-```
-$ docker network inspect -f '{{.IPAM.Config}}' kind
-```
-
-Este comando irá retornar qual a rede seu docker está utilizando.
-Ex: `[{192.168.48.0/20 192.168.48.1 map[]} {fc00:f853:ccd:e793::/64 map[]}]`
-
-Altere o arquivo [metallb.yaml](lb-kind/metallb.yaml) da pasta lb-kind, na linha 12, para indicar qual o range de IP.
-No exemplo podemos utilizar `192.168.48.200-192.168.48.250` e nosso arquivo ficará da seguinda forma:
-
-```yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  namespace: metallb-system
-  name: config
-data:
-  config: |
-    address-pools:
-    - name: default
-      protocol: layer2
-      addresses:
-      - 192.168.48.200-192.168.48.250
-```
-
 ### Mongo DB
 
 Na nossa aplicação utilizamos o mongo DB como base de dados das rotas.
@@ -142,20 +102,10 @@ db.routes.insertMany([
 
 ### Backend
 
-#### Build da imagem e envio ao docker-hub (entrar na pasta [../nest-api](../nest-api))
-
-```bash
-$ docker build -t <usuario>/<nome-imagem> -f Dockerfile.prod .
-$ docker push <usuario>/<nome-imagem>
-```
-
 #### Ajustar configurações do k8s
 
 Alterar a linha 7 do arquivo [configmap.yaml](backend/configmap.yaml) para corresponder à conexão do seu mongo db.
 Ex: `MONGO_DSN=mongodb://root:root@mongodb/nest?authSource=admin`
-
-Alterar a linha 17 do arquivo [deploy.yaml](backend/deploy.yaml) para corresponder à sua imagem de docker (`<usuario>/<nome-imagem>`)
-Ex: `image: ottoni/fsfc-desafio02-back:latest`
 
 #### Instalar backend no kubernetes
 
@@ -164,12 +114,12 @@ Após realizar as configurações, podemos instalar o backend no kubernetes
 ```bash
 $ kubectl apply -f backend/configmap.yaml
 $ kubectl apply -f backend/deploy.yaml
-$ kubectl apply -f backend/service.yaml
+$ kubectl expose -f backend/deploy.yaml
 ```
 
 #### Validação
 
-Os 3 arquivos irão gerar elementos dentro do kubernetes, entre eles uma pod com o container e imagem do backend e um load balancer.
+Os comandos irão gerar elementos dentro do kubernetes, entre eles uma pod com o container e imagem do backend e um ClusterIP.
 
     $ kubectl get configmap
 
@@ -191,35 +141,19 @@ mongodb-565c58b4c8-ftsv8    1/1     Running   0          1d1h
 
 ```console
 NAME               TYPE           CLUSTER-IP      EXTERNAL-IP      PORT(S)          AGE
-backend-service    LoadBalancer   10.96.76.54     192.168.48.200   3000:30647/TCP   55s
+backend            ClusterIP      10.96.76.54     <none>           3000/TCP        55s
 kubernetes         ClusterIP      10.96.0.1       <none>           443/TCP          2d10h
 mongodb            ClusterIP      10.96.127.184   <none>           27017/TCP        1d1h
 ```
 
-IP gerado pelo load balancer que deveremos utilizar para acessar estará no campo `EXTERNAL-IP`. Este endereço será utilizado posteriormente no front-end.
+Realizar o port-forward do container para poder acessar localmente.
 
-Acessar `http://192.168.48.200:3000/routes`, substituindo o IP pelo gerado no servidor.
+kubectl port-forward service/backend 3000
+
+Acessar `http://localhost:3000/routes`, substituindo o IP pelo gerado no servidor.
 Este endereço deverá retornar um JSON com as rotas cadastradas no mongodb.
 
 ### Frontend
-
-### Ajustar URL do backend
-
-Alterar o parâmetro `REACT_APP_API_URL` no arquivo [.env](../front-react/.env) da pasta [../front-react](../front-react) conforme o IP obtido pelo load-balancer do backend.
-Por ser um código estático, precisamos realizar o ajuste antes do build da imagem.
-Ex: `REACT_APP_API_URL=http://192.168.48.200:3000`
-
-#### Build da imagem e envio ao docker-hub (entrar na pasta [../front-react](../front-react))
-
-```bash
-$ docker build -t <usuario>/<nome-imagem> -f Dockerfile.prod .
-$ docker push <usuario>/<nome-imagem>
-```
-
-#### Ajustar imagem
-
-Alterar a linha 17 do arquivo [deploy.yaml](frontend/deploy.yaml) para corresponder à sua imagem de docker (`<usuario>/<nome-imagem>`)
-Ex: `image: ottoni/fsfc-desafio02-front:latest`
 
 #### Instalar frontend no kubernetes
 
@@ -227,12 +161,12 @@ Após realizar as configurações, podemos instalar o frontend no kubernetes
 
 ```bash
 $ kubectl apply -f frontend/deploy.yaml
-$ kubectl apply -f frontend/service.yaml
+$ kubectl expose -f frontend/deploy.yaml
 ```
 
 #### Validação
 
-Os 2 arquivos irão gerar elementos dentro do kubernetes, entre eles uma pod com o container e imagem do frontend e um load balancer.
+Os 2 comandos irão gerar elementos dentro do kubernetes, entre eles uma pod com o container e imagem do frontend e um ClusterIP.
 
     $ kubectl get pods
 
@@ -247,14 +181,17 @@ mongodb-565c58b4c8-ftsv8    1/1     Running   0          1d3h
 
 ```console
 NAME               TYPE           CLUSTER-IP      EXTERNAL-IP      PORT(S)          AGE
-backend-service    LoadBalancer   10.96.76.54     192.168.48.200   3000:30647/TCP   2h
-frontend-service   LoadBalancer   10.96.79.190    192.168.48.202   80:31528/TCP     50s
+backend            ClusterIP      10.96.76.54     <none>           3000/TCP        55s
+frontend           ClusterIP      10.96.83.65     <none>           80/TCP        55s
 kubernetes         ClusterIP      10.96.0.1       <none>           443/TCP          2d12h
 mongodb            ClusterIP      10.96.127.184   <none>           27017/TCP        1d3h
 ```
 
-IP gerado pelo load balancer que deveremos utilizar para acessar estará no campo `EXTERNAL-IP`.
-Acessar `http://192.168.48.202`, substituindo o IP pelo gerado no servidor.
+Realizar o port-forward do container para poder acessar localmente.
+
+kubectl port-forward service/frontend 3001:80
+
+Acessar `http://localhost:3001`, substituindo o IP pelo gerado no servidor.
 Este endereço deverá retornar a página com uma tabela das rotas.
 
 ![tela de rotas](doc/rotas_front.png)
